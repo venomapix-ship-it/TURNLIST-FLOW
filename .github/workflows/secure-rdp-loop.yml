@@ -1,4 +1,4 @@
-Name: Secure RDP via Tailscale (Automated Loop)
+name: Secure RDP via Tailscale (Automated Loop)
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           }
 
           $u = "Administrator"
-          $p = "Admin@12345"  # يمكنك تغيير كلمة المرور هنا إذا أردت
+          $p = "Admin@12345"
           
           # ⚙️ Core RDP Configuration
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
