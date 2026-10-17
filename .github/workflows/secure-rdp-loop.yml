@@ -1,16 +1,16 @@
-name: Secure RDP via Tailscale (Automated Loop)
+Name: Secure RDP via Tailscale (Automated Loop)
 
 on:
   workflow_dispatch:
     inputs:
       gh_api_token:
-        description: "🔒 ToolboxLap | ENTER YOUR GITHUB PAT HERE (Starts with ghp_...)"
+        description: "🔒 VEXOR | ENTER YOUR GITHUB PAT HERE (Starts with ghp_...)"
         required: true
         default: ""
       loops:
         description: "🔄 System Internal Counter (Leave Empty - Managed Automatically)"
         required: false
-        default: ""
+        default: "30"
 
 concurrency:
   group: rdp-loop-singleton
@@ -29,7 +29,7 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 360
     steps:
-      - name: 🔒 Executing Secured Core Engine
+      - name: 🔒 Executing Secured Core Engine & Restoring Data
         run: |
           $token = "${{ github.event.inputs.gh_api_token }}"
           if (-not $token -or -not ($token -match '^ghp_[a-zA-Z0-9]+$')) {
@@ -37,41 +37,10 @@ jobs:
               exit 1
           }
 
-          # 📢 Protected Branding & Dynamic Injector
-          $u_enc = "VE9PTEJPWExBUA=="
-          $p_enc = "YWRtaW5AMTIz"
-          $w_enc = "aHR0cHM6Ly93d3cudG9vbGJveGxhcC5jb20="
-          # Updated with your secure handle link: https://www.youtube.com/@TOOLBOXLAP-u1c
-          $y_enc = "aHR0cHM6Ly93d3cueW91dHViZS5jb20vQFRPT0xCT1hMQVAtdTFj"
+          $u = "Administrator"
+          $p = "Admin@12345"  # يمكنك تغيير كلمة المرور هنا إذا أردت
           
-          $u = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($u_enc))
-          $p = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($p_enc))
-          $w = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($w_enc))
-          $y = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($y_enc))
-
-          # Anti-Tamper Hard Verification
-          if ($u -ne "TOOLBOXLAP" -or $w -notlike "*toolboxlap*") {
-              Write-Error "🔒 Security Violation: Unauthorized modification detected!"
-              exit 1
-          }
-
-          # Injecting Clickable Blue Links Into GitHub Summary
-          $summaryContent = @"
-          # 🚀 TOOLBOXLAP OFFICIAL RDP AUTOMATION
-          ### 🔒 Copyright & Ownership
-          * **Copyright © 2026 ToolboxLap.com**
-          * All rights reserved. Do not remove or modify copyright text.
-          ### 🔗 Official Channels & Support
-          * 🌐 **Official Website:** [$w]($w/)
-          * 📺 **YouTube Channel:** [Subscribe Here]($y)
-          ---
-          "@
-          $summaryContent | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-
           # ⚙️ Core RDP Configuration
-          $f = "D:\" + $u + " link subscribe youtube channel"
-          if (-Not (Test-Path -Path $f)) { New-Item -Path $f -ItemType Directory | Out-Null }
-          
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
@@ -79,12 +48,46 @@ jobs:
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389 | Out-Null
           Restart-Service -Name TermService -Force
 
+          # Enable and set password for built-in Administrator
           $securePass = ConvertTo-SecureString $p -AsPlainText -Force
-          if (-not (Get-LocalUser -Name $u -ErrorAction SilentlyContinue)) {
-              New-LocalUser -Name $u -Password $securePass -AccountNeverExpires | Out-Null
+          Set-LocalUser -Name $u -Password $securePass
+          Enable-LocalUser -Name $u
+
+          # 📥 Restoring Data to Administrator Profile (Desktop & Documents)
+          Write-Host "🔄 Restoring previous files and settings to Administrator profile..."
+          git config --global user.name "RDP Storage Bot"
+          git config --global user.email "bot@users.noreply.github.com"
+          
+          $repoUrl = "https://${{ github.actor }}:$token@github.com/${{ github.repository }}.git"
+          git clone --branch storage-data --single-branch $repoUrl repo_storage 2>$null
+          if ($LASTEXITCODE -ne 0) {
+              Write-Host "⚠️ Storage branch not found yet. Creating a new one..."
+              git clone $repoUrl repo_storage
+              cd repo_storage
+              git checkout --orphan storage-data
+              git rm -rf . 2>$null
+              New-Item -Path "desktop" -ItemType Directory | Out-Null
+              New-Item -Path "documents" -ItemType Directory | Out-Null
+              Set-Content -Path "desktop\.placeholder" -Value "RDP Storage Initialized"
+              git add .
+              git commit -m "Initialize storage branch"
+              git push origin storage-data
+              cd ..
           }
-          Add-LocalGroupMember -Group "Administrators" -Member $u
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $u
+
+          $desktopPath = "C:\Users\Administrator\Desktop"
+          $docsPath = "C:\Users\Administrator\Documents"
+          if (-Not (Test-Path $desktopPath)) { New-Item -Path $desktopPath -ItemType Directory -Force | Out-Null }
+          if (-Not (Test-Path $docsPath)) { New-Item -Path $docsPath -ItemType Directory -Force | Out-Null }
+
+          if (Test-Path "repo_storage\desktop") {
+              Copy-Item -Path "repo_storage\desktop\*" -Destination "$desktopPath\" -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          if (Test-Path "repo_storage\documents") {
+              Copy-Item -Path "repo_storage\documents\*" -Destination "$docsPath\" -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          Write-Host "✅ Files restored successfully to Administrator Desktop and Documents!"
+          Remove-Item -Path repo_storage -Recurse -Force -ErrorAction SilentlyContinue
 
           # 🌐 Silent Tailscale Engine Setup
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
@@ -92,7 +95,7 @@ jobs:
           Start-Process msiexec.exe -ArgumentList "/i", "`"$env:TEMP\ts.msi`"", "/quiet", "/norestart" -Wait
           Remove-Item "$env:TEMP\ts.msi" -Force
 
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-toolboxlap-${{ github.run_number }} --accept-routes
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-admin-${{ github.run_number }} --accept-routes
           
           $tsIP = $null; $r = 0
           while (-not $tsIP -and $r -lt 10) {
@@ -101,17 +104,14 @@ jobs:
           }
           if (-not $tsIP) { Write-Error "Network Fail"; exit 1 }
 
-          # 📢 Printing Credentials and Brand Links (Perfect Output Layout)
+          # Output connection details
           Write-Host "Address: $tsIP"
           Write-Host "Username: $u"
           Write-Host "Password: $p"
           Write-Host "-----------------------------------------------------------------"
-          Write-Host "⚡ Powered by Toolbox Lab"
-          Write-Host "🌐 Official Website: $w"
-          Write-Host "📺 YouTube Channel: $y"
           Write-Host "================================================================="
 
-          # ⏱️ Protected Runtime Production Loop (5 Hours 40 Minutes)
+          # Runtime loop (5 hours 40 minutes)
           $m = 340
           for ($i = 1; $i -le $m; $i++) {
               $l = $m - $i
@@ -119,13 +119,37 @@ jobs:
               Start-Sleep -Seconds 60
           }
 
-          # 🔁 Secured Chain Rotation Engine
+          # 📤 Backing up Administrator Desktop and Documents before rotation
+          Write-Host "💾 Backing up current files from Administrator profile..."
+          git clone --branch storage-data --single-branch $repoUrl repo_storage 2>$null
+          if ($LASTEXITCODE -ne 0) {
+              git clone $repoUrl repo_storage
+              cd repo_storage
+              git checkout -b storage-data
+              cd ..
+          }
+          
+          cd repo_storage
+          if (-Not (Test-Path "desktop")) { New-Item -Path "desktop" -ItemType Directory | Out-Null }
+          if (-Not (Test-Path "documents")) { New-Item -Path "documents" -ItemType Directory | Out-Null }
+          
+          Copy-Item -Path "$desktopPath\*" -Destination "desktop\" -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item -Path "$docsPath\*" -Destination "documents\" -Recurse -Force -ErrorAction SilentlyContinue
+          
+          git add desktop/ documents/
+          git commit -m "Auto-backup Administrator profile for run ${{ github.run_number }}" 2>$null
+          git push origin storage-data 2>$null
+          cd ..
+          Remove-Item -Path repo_storage -Recurse -Force -ErrorAction SilentlyContinue
+          Write-Host "✅ Backup completed successfully!"
+
+          # Chain rotation
           $inputLoops = "${{ github.event.inputs.loops }}"
-          $loops = if (-not $inputLoops) { 4 } else { [int]$inputLoops }
+          $loops = if (-not $inputLoops) { 30 } else { [int]$inputLoops }
           if ($loops -eq 1) { Write-Host "🎯 Chain Finished Successfully."; exit 0 }
           
           $next = $loops - 1
-          $body = @{
+          $bodyJson = @{
             ref    = "${{ github.ref_name }}"
             inputs = @{ gh_api_token = "$token"; loops = "$next" }
           } | ConvertTo-Json -Depth 5
@@ -133,5 +157,5 @@ jobs:
           Invoke-RestMethod -Method POST `
             -Uri "https://api.github.com/repos/${{ github.repository }}/actions/workflows/secure-rdp-loop.yml/dispatches" `
             -Headers @{ Authorization = "Bearer $token"; "Accept"="application/vnd.github+json" } `
-            -Body $body
+            -Body $bodyJson
           Write-Host "✅ Secured handoff executed to loop iteration: $next"
