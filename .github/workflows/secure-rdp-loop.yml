@@ -48,10 +48,8 @@ jobs:
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389 | Out-Null
           Restart-Service -Name TermService -Force
 
-          # Enable and set password for built-in Administrator
-          $securePass = ConvertTo-SecureString $p -AsPlainText -Force
-          Set-LocalUser -Name $u -Password $securePass
-          Enable-LocalUser -Name $u
+          # Enable and set password for built-in Administrator using net user
+          net user $u $p /active:yes
 
           # 📥 Restoring Data to Administrator Profile (Desktop & Documents)
           Write-Host "🔄 Restoring previous files and settings to Administrator profile..."
