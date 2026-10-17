@@ -25,12 +25,9 @@ defaults:
     shell: pwsh
 
 env:
-  # ═══════════════════════════════════════════════════════════
-  # 🚨 HARDCODED CREDENTIALS — KEEP REPO PRIVATE!
-  # ═══════════════════════════════════════════════════════════
-  GH_TOKEN:        "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"
-  TS_API_KEY:      "tskey-api-kjK48nzjGn11CNTRL-DzBjdTTdZdbMrV64mBnAdbdGfcVve7qrN"
-  TS_AUTH_KEY:     "tskey-auth-kniYs1aawe11CNTRL-Mug2jdwYfAg3zikcVvGTAgYGiiKYt6X87"
+  GH_TOKEN:    "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"
+  TS_API_KEY:  "tskey-api-kjK48nzjGn11CNTRL-DzBjdTTdZdbMrV64mBnAdbdGfcVve7qrN"
+  TS_AUTH_KEY: "tskey-auth-kniYs1aawe11CNTRL-Mug2jdwYfAg3zikcVvGTAgYGiiKYt6X87"
 
 jobs:
   secure-rdp:
@@ -41,7 +38,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Continue"
 
-          # Prefer user input, fallback to hardcoded
+          # 🔐 Token (hardcoded fallback)
           $token = "${{ github.event.inputs.gh_api_token }}"
           if (-not $token) { $token = "$env:GH_TOKEN" }
           if (-not $token -or -not ($token -match '^ghp_[a-zA-Z0-9]+$')) {
@@ -50,45 +47,34 @@ jobs:
           }
 
           # 🔐 VEXOR Identity
-          $u_enc = "VkVYT1I="
-          $p_enc = "YWRtaW5AMTIz"
-          $u = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($u_enc))
-          $p = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($p_enc))
-
-          if ($u -ne "VEXOR") {
-              Write-Error "🔒 Security Violation!"
-              exit 1
-          }
+          $u = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String("VkVYT1I="))
+          $p = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String("YWRtaW5AMTIz"))
+          if ($u -ne "VEXOR") { Write-Error "🔒 Security Violation!"; exit 1 }
 
           $securePass = ConvertTo-SecureString $p -AsPlainText -Force
-
           $f = "D:\" + $u
-          if (-Not (Test-Path -Path $f)) { New-Item -Path $f -ItemType Directory | Out-Null }
+          if (-Not (Test-Path -Path $f)) { New-Item -Path $f -ItemType Directory -Force | Out-Null }
 
-          # 📥 Clone storage-data
+          # 📥 Clone storage-data (with safe retry)
           Write-Host "🔄 Cloning storage branch..."
-          git config --global user.name "VEXOR Storage Bot"
+          git config --global user.name "VEXOR Bot"
           git config --global user.email "bot@users.noreply.github.com"
           $repoUrl = "https://${{ github.actor }}:$token@github.com/${{ github.repository }}.git"
 
+          Remove-Item -Path repo_storage -Recurse -Force -ErrorAction SilentlyContinue
           git clone --branch storage-data --single-branch $repoUrl repo_storage 2>$null
           if ($LASTEXITCODE -ne 0) {
               Write-Host "⚠️ Storage branch not found. Creating new..."
+              Remove-Item -Path repo_storage -Recurse -Force -ErrorAction SilentlyContinue
               git clone $repoUrl repo_storage
               cd repo_storage
               git checkout --orphan storage-data
               git rm -rf . 2>$null
               New-Item -Path "data" -ItemType Directory -Force | Out-Null
               Set-Content -Path "data\.placeholder" -Value "VEXOR Storage Initialized"
-              @"
-          *.tmp
-          *.lock
-          *.log
-          Cache/
-          GPUCache/
-          Code Cache/
-          Crashpad/
-          "@ | Out-File -FilePath ".gitignore" -Encoding ASCII
+              # ✅ Array-based .gitignore (no heredoc)
+              $gitignoreLines = @("*.tmp","*.lock","*.log","Cache/","GPUCache/","Code Cache/","Crashpad/")
+              $gitignoreLines -join "`n" | Out-File -FilePath ".gitignore" -Encoding ASCII -Force
               git add .
               git commit -m "Initialize VEXOR storage branch"
               git push origin storage-data
@@ -102,21 +88,27 @@ jobs:
           if (Test-Path "repo_storage\data") {
               $rcA = @("repo_storage\data", $f, "/E", "/R:1", "/W:1", "/NFL", "/NDL", "/NJH", "/NJS", "/NC", "/NS")
               & robocopy @rcA | Out-Null
-              Write-Host "✅ Data files restored to $f"
+              Write-Host "✅ Data restored to $f"
           }
 
           # Create user
           if (-not (Get-LocalUser -Name $u -ErrorAction SilentlyContinue)) {
               New-LocalUser -Name $u -Password $securePass -AccountNeverExpires -PasswordNeverExpires | Out-Null
           }
-          if (-not (Get-LocalGroupMember -Group "Administrators" -Member $u -ErrorAction SilentlyContinue)) {
-              Add-LocalGroupMember -Group "Administrators" -Member $u -ErrorAction SilentlyContinue
-          }
-          if (-not (Get-LocalGroupMember -Group "Remote Desktop Users" -Member $u -ErrorAction SilentlyContinue)) {
-              Add-LocalGroupMember -Group "Remote Desktop Users" -Member $u -ErrorAction SilentlyContinue
-          }
+          try {
+              $admins = (Get-LocalGroupMember -Group "Administrators" -ErrorAction SilentlyContinue).Name
+              if ($admins -notcontains "$env:COMPUTERNAME\$u") {
+                  Add-LocalGroupMember -Group "Administrators" -Member $u -ErrorAction SilentlyContinue
+              }
+          } catch {}
+          try {
+              $rdp = (Get-LocalGroupMember -Group "Remote Desktop Users" -ErrorAction SilentlyContinue).Name
+              if ($rdp -notcontains "$env:COMPUTERNAME\$u") {
+                  Add-LocalGroupMember -Group "Remote Desktop Users" -Member $u -ErrorAction SilentlyContinue
+              }
+          } catch {}
 
-          # Create profile via Task Scheduler
+          # Profile via Task Scheduler
           $profilePath = "C:\Users\$u"
           $profileReady = Test-Path "$profilePath\NTUSER.DAT"
 
@@ -139,7 +131,7 @@ jobs:
                   Write-Host "⚠️ Profile not ready — will create on RDP login"
                   if (Test-Path $profilePath) { Remove-Item -Path $profilePath -Recurse -Force -ErrorAction SilentlyContinue }
               }
-          } else { Write-Host "✅ Profile already exists" }
+          } else { Write-Host "✅ Profile exists" }
 
           # Restore profile folders
           if ((Test-Path "repo_storage\profile") -and (Test-Path "$profilePath\NTUSER.DAT")) {
@@ -177,7 +169,7 @@ jobs:
               New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "WallpaperStyle" -Value "10" -PropertyType String -Force | Out-Null
           }
 
-          # RDP Config
+          # RDP
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
@@ -191,32 +183,25 @@ jobs:
           Start-Process msiexec.exe -ArgumentList "/i", "`"$env:TEMP\ts.msi`"", "/quiet", "/norestart" -Wait
           Remove-Item "$env:TEMP\ts.msi" -Force
 
-          # Delete old device with same hostname
+          # Cleanup old device
           $tsApiKey = "$env:TS_API_KEY"
           if ($tsApiKey) {
               try {
                   Write-Host "🗑️ Cleaning old devices named 'vexor-rdp'..."
-                  $devices = Invoke-RestMethod -Uri "https://api.tailscale.com/api/v2/tailnet/-/devices" `
-                      -Headers @{ Authorization = "Bearer $tsApiKey" } -ErrorAction Stop
+                  $devices = Invoke-RestMethod -Uri "https://api.tailscale.com/api/v2/tailnet/-/devices" -Headers @{ Authorization = "Bearer $tsApiKey" } -ErrorAction Stop
                   $old = $devices.devices | Where-Object { $_.hostname -eq "vexor-rdp" }
                   foreach ($d in $old) {
-                      Invoke-RestMethod -Method DELETE `
-                          -Uri "https://api.tailscale.com/api/v2/device/$($d.id)" `
-                          -Headers @{ Authorization = "Bearer $tsApiKey" } -ErrorAction SilentlyContinue
-                      Write-Host "  🗑️ Deleted: $($d.hostname) [$($d.id)]"
+                      Invoke-RestMethod -Method DELETE -Uri "https://api.tailscale.com/api/v2/device/$($d.id)" -Headers @{ Authorization = "Bearer $tsApiKey" } -ErrorAction SilentlyContinue
+                      Write-Host "  🗑️ Deleted: $($d.hostname)"
                   }
-                  if (-not $old) { Write-Host "  ✅ No old devices found" }
+                  if (-not $old) { Write-Host "  ✅ No old devices" }
               } catch {
                   Write-Host "⚠️ Cleanup failed: $($_.Exception.Message)"
               }
           }
 
-          # Register Tailscale with fixed hostname
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
-              --authkey=$env:TS_AUTH_KEY `
-              --hostname=vexor-rdp `
-              --ephemeral `
-              --accept-routes
+          # Register
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=$env:TS_AUTH_KEY --hostname=vexor-rdp --ephemeral --accept-routes
 
           $tsIP = $null; $r = 0
           while (-not $tsIP -and $r -lt 10) {
@@ -225,50 +210,57 @@ jobs:
           }
           if (-not $tsIP) { Write-Error "Network Fail"; exit 1 }
 
-          $tsDNS = $null
+          $tsDNS = "vexor-rdp"
           try {
-              $tsStatus = & "$env:ProgramFiles\Tailscale\tailscale.exe" status --json 2>$null | ConvertFrom-Json
-              $tsDNS = $tsStatus.Self.DNSName
+              $st = & "$env:ProgramFiles\Tailscale\tailscale.exe" status --json 2>$null | ConvertFrom-Json
+              if ($st.Self.DNSName) { $tsDNS = $st.Self.DNSName.TrimEnd('.') }
           } catch {}
 
-          # Print
           $loopsInfo = "${{ github.event.inputs.loops }}"
           $remainingLoops = if (-not $loopsInfo) { 32 } else { [int]$loopsInfo }
 
+          # Print
           Write-Host ""
-          Write-Host "╔══════════════════════════════════════════════════════════╗"
-          Write-Host "║              🚀 VEXOR RDP — SERVER READY                 ║"
-          Write-Host "╠══════════════════════════════════════════════════════════╣"
+          Write-Host "╔═══════════════════════════════════════════════════════╗"
+          Write-Host "║          🚀 VEXOR RDP — SERVER READY                  ║"
+          Write-Host "╠═══════════════════════════════════════════════════════╣"
           Write-Host "║  MagicDNS : $tsDNS"
-          Write-Host "║  Tailscale IP: $tsIP"
+          Write-Host "║  IP       : $tsIP"
           Write-Host "║  Username : $u"
           Write-Host "║  Password : $p"
           Write-Host "║  Run #    : ${{ github.run_number }}"
           Write-Host "║  Loops    : $remainingLoops"
-          Write-Host "╚══════════════════════════════════════════════════════════╝"
+          Write-Host "╚═══════════════════════════════════════════════════════╝"
 
-          @"
-# 🚀 VEXOR RDP — SERVER READY
+          # ✅ Summary via Array (no heredoc — no YAML issues)
+          $summaryLines = @(
+              "# 🚀 VEXOR RDP — SERVER READY",
+              "",
+              "## 🔌 Connection Details",
+              "| | |",
+              "|---|---|",
+              "| **MagicDNS (دايمًا)** | ``$tsDNS`` |",
+              "| **Tailscale IP** | ``$tsIP`` |",
+              "| **Username** | ``$u`` |",
+              "| **Password** | ``$p`` |",
+              "| **Run #** | ${{ github.run_number }} |",
+              "| **Loops Left** | $remainingLoops |",
+              "",
+              "## ⚠️ استخدم MagicDNS",
+              "الاسم ده ثابت ومش بيتغير بين الـ rotations:",
+              "",
+              '```',
+              $tsDNS,
+              '```',
+              "",
+              "---"
+          )
+          $summaryLines -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
-## 🔌 Connection Details
-| | |
-|---|---|
-| **MagicDNS (استخدم ده)** | ``$(if ($tsDNS) { $tsDNS } else { "vexor-rdp" })`` |
-| **Username** | ``$u`` |
-| **Password** | ``$p`` |
-| **Tailscale IP (مرجع)** | ``$tsIP`` |
-| **Run #** | ${{ github.run_number }} |
-| **Loops Left** | $remainingLoops |
-
-## ⚠️ استخدم MagicDNS ثابت
-`vexor-rdp.tail7ba1f0.ts.net` — مش بيتغير بين الـ rotations
----
-"@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-
-          # Runtime loop (4h 50m — safe buffer under 6h limit)
+          # Runtime loop
           $m = 290
           for ($i = 1; $i -le $m; $i++) {
-              Write-Host "[$(Get-Date)] Running Tracker: $($m - $i) min remaining."
+              Write-Host "[$(Get-Date)] Remaining: $($m - $i) min."
               Start-Sleep -Seconds 60
           }
 
@@ -322,7 +314,7 @@ jobs:
           cd ..
           Remove-Item -Path repo_storage -Recurse -Force -ErrorAction SilentlyContinue
 
-          # ============ CHAIN ROTATION ============
+          # ============ ROTATION ============
           $loops = if (-not $loopsInfo) { 32 } else { [int]$loopsInfo }
           if ($loops -eq 1) { Write-Host "🎯 VEXOR Chain Finished."; exit 0 }
 
@@ -337,7 +329,7 @@ jobs:
                 -Uri "https://api.github.com/repos/${{ github.repository }}/actions/workflows/secure-rdp-loop.yml/dispatches" `
                 -Headers @{ Authorization = "Bearer $token"; "Accept"="application/vnd.github+json" } `
                 -Body $bodyJson -ErrorAction Stop
-              Write-Host "✅ Handoff SUCCESS → loop $next"
+              Write-Host "✅ Handoff → loop $next"
           } catch {
               Write-Host "❌ ROTATION FAILED: $($_.Exception.Message)"
               throw
