@@ -38,7 +38,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Continue"
 
-          # 🔐 Token (hardcoded fallback)
+          # 🔐 Token
           $token = "${{ github.event.inputs.gh_api_token }}"
           if (-not $token) { $token = "$env:GH_TOKEN" }
           if (-not $token -or -not ($token -match '^ghp_[a-zA-Z0-9]+$')) {
@@ -55,7 +55,7 @@ jobs:
           $f = "D:\" + $u
           if (-Not (Test-Path -Path $f)) { New-Item -Path $f -ItemType Directory -Force | Out-Null }
 
-          # 📥 Clone storage-data (with safe retry)
+          # 📥 Clone storage-data
           Write-Host "🔄 Cloning storage branch..."
           git config --global user.name "VEXOR Bot"
           git config --global user.email "bot@users.noreply.github.com"
@@ -72,7 +72,6 @@ jobs:
               git rm -rf . 2>$null
               New-Item -Path "data" -ItemType Directory -Force | Out-Null
               Set-Content -Path "data\.placeholder" -Value "VEXOR Storage Initialized"
-              # ✅ Array-based .gitignore (no heredoc)
               $gitignoreLines = @("*.tmp","*.lock","*.log","Cache/","GPUCache/","Code Cache/","Crashpad/")
               $gitignoreLines -join "`n" | Out-File -FilePath ".gitignore" -Encoding ASCII -Force
               git add .
@@ -169,7 +168,7 @@ jobs:
               New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "WallpaperStyle" -Value "10" -PropertyType String -Force | Out-Null
           }
 
-          # RDP
+          # RDP Config
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
@@ -200,8 +199,11 @@ jobs:
               }
           }
 
-          # Register
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=$env:TS_AUTH_KEY --hostname=vexor-rdp --ephemeral --accept-routes
+          # Register Tailscale — ✅ تمت إزالة --ephemeral
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
+              --authkey=$env:TS_AUTH_KEY `
+              --hostname=vexor-rdp `
+              --accept-routes
 
           $tsIP = $null; $r = 0
           while (-not $tsIP -and $r -lt 10) {
@@ -232,7 +234,7 @@ jobs:
           Write-Host "║  Loops    : $remainingLoops"
           Write-Host "╚═══════════════════════════════════════════════════════╝"
 
-          # ✅ Summary via Array (no heredoc — no YAML issues)
+          # Summary
           $summaryLines = @(
               "# 🚀 VEXOR RDP — SERVER READY",
               "",
