@@ -34,39 +34,49 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 360
     steps:
-      - name: 🔒 VEXOR Core Engine
+      - name: 🔒 VEXOR Core Engine (Debug Mode)
         run: |
           $ErrorActionPreference = "Continue"
 
-          # 🔐 Token
+          function Write-Log {
+              param([string]$Message, [string]$Color = "White")
+              Write-Host "[$(Get-Date -Format 'HH:mm:ss')] $Message" -ForegroundColor $Color
+          }
+
+          Write-Log "🚀 [PHASE 1] Starting VEXOR Engine..." "Cyan"
+
+          # 🔐 Token Check
           $token = "${{ github.event.inputs.gh_api_token }}"
           if (-not $token) { $token = "$env:GH_TOKEN" }
           if (-not $token -or -not ($token -match '^ghp_[a-zA-Z0-9]+$')) {
-              Write-Error "❌ Invalid Token!"
+              Write-Log "❌ Invalid Token!" "Red"
               exit 1
           }
 
           # 🔐 VEXOR Identity
           $u = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String("VkVYT1I="))
           $p = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String("YWRtaW5AMTIz"))
-          if ($u -ne "VEXOR") { Write-Error "🔒 Security Violation!"; exit 1 }
+          if ($u -ne "VEXOR") { Write-Log "🔒 Security Violation!" "Red"; exit 1 }
 
           $securePass = ConvertTo-SecureString $p -AsPlainText -Force
           $f = "D:\" + $u
           if (-Not (Test-Path -Path $f)) { New-Item -Path $f -ItemType Directory -Force | Out-Null }
 
-          # 📥 Clone storage-data
-          Write-Host "🔄 Cloning storage branch..."
+          # ==========================================
+          Write-Log "📥 [PHASE 2] Cloning storage branch..." "Cyan"
           git config --global user.name "VEXOR Bot"
           git config --global user.email "bot@users.noreply.github.com"
           $repoUrl = "https://${{ github.actor }}:$token@github.com/${{ github.repository }}.git"
 
           Remove-Item -Path repo_storage -Recurse -Force -ErrorAction SilentlyContinue
-          git clone --branch storage-data --single-branch $repoUrl repo_storage 2>$null
+          git clone --branch storage-data --single-branch $repoUrl repo_storage 2>&1 | Out-Null
+          
           if ($LASTEXITCODE -ne 0) {
-              Write-Host "⚠️ Storage branch not found. Creating new..."
+              Write-Log "⚠️ Storage branch not found or clone failed. Creating new..." "Yellow"
               Remove-Item -Path repo_storage -Recurse -Force -ErrorAction SilentlyContinue
               git clone $repoUrl repo_storage
+              if ($LASTEXITCODE -ne 0) { Write-Log "❌ Fatal: Could not clone repo. Check Token permissions." "Red"; exit 1 }
+              
               cd repo_storage
               git checkout --orphan storage-data
               git rm -rf . 2>$null
@@ -77,62 +87,59 @@ jobs:
               git add .
               git commit -m "Initialize VEXOR storage branch"
               git push origin storage-data
+              if ($LASTEXITCODE -ne 0) { Write-Log "❌ Fatal: Could not push initial storage branch." "Red"; exit 1 }
               cd ..
+          } else {
+              Write-Log "✅ Cloned successfully." "Green"
           }
 
           $exclDirs = @("Cache","GPUCache","Code Cache","CacheStorage","Service Worker","CachedData","Crashpad","ShaderCache","Temp","tmp","Logs","logs","Crash Reports",".tmp","blob_storage","IndexedDB","Local Storage")
           $exclFiles = @("*.tmp","*.lock","*.log","LOCK","*.ldb","*.pid")
 
-          # Restore D:\VEXOR
+          # ==========================================
+          Write-Log "📂 [PHASE 3] Restoring Files..." "Cyan"
           if (Test-Path "repo_storage\data") {
               $rcA = @("repo_storage\data", $f, "/E", "/R:1", "/W:1", "/NFL", "/NDL", "/NJH", "/NJS", "/NC", "/NS")
               & robocopy @rcA | Out-Null
-              Write-Host "✅ Data restored to $f"
+              Write-Log "✅ Data restored." "Green"
           }
 
-          # Create user
+          # Create User & Profile
+          Write-Log "👤 [PHASE 4] Setting up User..." "Cyan"
           if (-not (Get-LocalUser -Name $u -ErrorAction SilentlyContinue)) {
               New-LocalUser -Name $u -Password $securePass -AccountNeverExpires -PasswordNeverExpires | Out-Null
           }
           try {
               $admins = (Get-LocalGroupMember -Group "Administrators" -ErrorAction SilentlyContinue).Name
-              if ($admins -notcontains "$env:COMPUTERNAME\$u") {
-                  Add-LocalGroupMember -Group "Administrators" -Member $u -ErrorAction SilentlyContinue
-              }
+              if ($admins -notcontains "$env:COMPUTERNAME\$u") { Add-LocalGroupMember -Group "Administrators" -Member $u -ErrorAction SilentlyContinue }
           } catch {}
           try {
               $rdp = (Get-LocalGroupMember -Group "Remote Desktop Users" -ErrorAction SilentlyContinue).Name
-              if ($rdp -notcontains "$env:COMPUTERNAME\$u") {
-                  Add-LocalGroupMember -Group "Remote Desktop Users" -Member $u -ErrorAction SilentlyContinue
-              }
+              if ($rdp -notcontains "$env:COMPUTERNAME\$u") { Add-LocalGroupMember -Group "Remote Desktop Users" -Member $u -ErrorAction SilentlyContinue }
           } catch {}
 
-          # Profile via Task Scheduler
           $profilePath = "C:\Users\$u"
           $profileReady = Test-Path "$profilePath\NTUSER.DAT"
 
           if (-not $profileReady) {
-              Write-Host "🔄 Creating user profile for $u..."
+              Write-Log "🔄 Creating user profile..." "Yellow"
               $taskName = "VEXOR_ProfileInit"
               schtasks /Delete /TN $taskName /F 2>&1 | Out-Null
-              $null = schtasks /Create /TN $taskName /TR "cmd.exe /c exit" /SC ONCE /ST 23:59 /RU $u /RP $p /F /RL HIGHEST 2>&1
+              schtasks /Create /TN $taskName /TR "cmd.exe /c exit" /SC ONCE /ST 23:59 /RU $u /RP $p /F /RL HIGHEST 2>&1 | Out-Null
               if ($LASTEXITCODE -eq 0) {
-                  $null = schtasks /Run /TN $taskName 2>&1
+                  schtasks /Run /TN $taskName 2>&1 | Out-Null
                   $waited = 0
-                  while (-not (Test-Path "$profilePath\NTUSER.DAT") -and $waited -lt 30) {
-                      Start-Sleep -Seconds 2; $waited += 2
-                  }
+                  while (-not (Test-Path "$profilePath\NTUSER.DAT") -and $waited -lt 30) { Start-Sleep -Seconds 2; $waited += 2 }
                   schtasks /Delete /TN $taskName /F 2>&1 | Out-Null
               }
-              $profileReady = Test-Path "$profilePath\NTUSER.DAT"
-              if ($profileReady) { Write-Host "✅ Profile created" }
-              else {
-                  Write-Host "⚠️ Profile not ready — will create on RDP login"
-                  if (Test-Path $profilePath) { Remove-Item -Path $profilePath -Recurse -Force -ErrorAction SilentlyContinue }
+              if (Test-Path "$profilePath\NTUSER.DAT") { Write-Log "✅ Profile created." "Green" }
+              else { 
+                  Write-Log "⚠️ Profile not ready. Will create on login." "Yellow"
+                  if (Test-Path $profilePath) { Remove-Item -Path $profilePath -Recurse -Force -ErrorAction SilentlyContinue } 
               }
-          } else { Write-Host "✅ Profile exists" }
+          } else { Write-Log "✅ Profile exists." "Green" }
 
-          # Restore profile folders
+          # Restore Profile
           if ((Test-Path "repo_storage\profile") -and (Test-Path "$profilePath\NTUSER.DAT")) {
               foreach ($sub in @("Desktop","Documents","Downloads","Pictures","Videos","Music")) {
                   $src = "repo_storage\profile\$sub"
@@ -141,18 +148,17 @@ jobs:
                       if (-not (Test-Path $dst)) { New-Item -Path $dst -ItemType Directory -Force | Out-Null }
                       $rcA = @($src, $dst, "/E", "/R:1", "/W:1", "/NFL", "/NDL", "/NJH", "/NJS", "/NC", "/NS") + @("/XD") + $exclDirs + @("/XF") + $exclFiles
                       & robocopy @rcA | Out-Null
-                      Write-Host "  ✅ Restored: $sub"
                   }
               }
+              Write-Log "✅ Profile folders restored." "Green"
           }
 
-          # Restore AppData
           if ((Test-Path "repo_storage\appdata\Roaming") -and (Test-Path "$profilePath\NTUSER.DAT")) {
               $dstAD = "$profilePath\AppData\Roaming"
               if (-not (Test-Path $dstAD)) { New-Item -Path $dstAD -ItemType Directory -Force | Out-Null }
               $rcA = @("repo_storage\appdata\Roaming", $dstAD, "/E", "/R:1", "/W:1", "/NFL", "/NDL", "/NJH", "/NJS", "/NC", "/NS") + @("/XD") + $exclDirs + @("/XF") + $exclFiles
               & robocopy @rcA | Out-Null
-              Write-Host "  ✅ Restored: AppData\Roaming"
+              Write-Log "✅ AppData restored." "Green"
           }
 
           if (Test-Path "$profilePath\NTUSER.DAT") {
@@ -168,49 +174,47 @@ jobs:
               New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "WallpaperStyle" -Value "10" -PropertyType String -Force | Out-Null
           }
 
-          # RDP Config
+          # ==========================================
+          Write-Log "🌐 [PHASE 5] Configuring RDP & Services..." "Cyan"
+          Set-Service -Name TermService -StartupType Automatic -ErrorAction SilentlyContinue
+          Set-Service -Name Tailscale -StartupType Automatic -ErrorAction SilentlyContinue
+
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
           netsh advfirewall firewall delete rule name="RDP-Tailscale" | Out-Null
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389 | Out-Null
-          Restart-Service -Name TermService -Force
+          Restart-Service -Name TermService -Force -ErrorAction SilentlyContinue
 
-          # ============ TAILSCALE ============
+          Write-Log "🔐 [PHASE 6] Installing Tailscale..." "Cyan"
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           Invoke-WebRequest -Uri $tsUrl -OutFile "$env:TEMP\ts.msi"
           Start-Process msiexec.exe -ArgumentList "/i", "`"$env:TEMP\ts.msi`"", "/quiet", "/norestart" -Wait
           Remove-Item "$env:TEMP\ts.msi" -Force
 
-          # Cleanup old device
           $tsApiKey = "$env:TS_API_KEY"
           if ($tsApiKey) {
               try {
-                  Write-Host "🗑️ Cleaning old devices named 'vexor-rdp'..."
+                  Write-Log "🗑️ Cleaning old devices..." "Yellow"
                   $devices = Invoke-RestMethod -Uri "https://api.tailscale.com/api/v2/tailnet/-/devices" -Headers @{ Authorization = "Bearer $tsApiKey" } -ErrorAction Stop
                   $old = $devices.devices | Where-Object { $_.hostname -eq "vexor-rdp" }
                   foreach ($d in $old) {
                       Invoke-RestMethod -Method DELETE -Uri "https://api.tailscale.com/api/v2/device/$($d.id)" -Headers @{ Authorization = "Bearer $tsApiKey" } -ErrorAction SilentlyContinue
-                      Write-Host "  🗑️ Deleted: $($d.hostname)"
                   }
-                  if (-not $old) { Write-Host "  ✅ No old devices" }
+                  Write-Log "✅ Cleanup done." "Green"
               } catch {
-                  Write-Host "⚠️ Cleanup failed: $($_.Exception.Message)"
+                  Write-Log "⚠️ Cleanup failed: $($_.Exception.Message)" "Yellow"
               }
           }
 
-          # Register Tailscale — ✅ تمت إزالة --ephemeral
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
-              --authkey=$env:TS_AUTH_KEY `
-              --hostname=vexor-rdp `
-              --accept-routes
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=$env:TS_AUTH_KEY --hostname=vexor-rdp --accept-routes
 
           $tsIP = $null; $r = 0
           while (-not $tsIP -and $r -lt 10) {
               $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
               Start-Sleep -Seconds 5; $r++
           }
-          if (-not $tsIP) { Write-Error "Network Fail"; exit 1 }
+          if (-not $tsIP) { Write-Log "❌ Network Fail: Tailscale did not get an IP." "Red"; exit 1 }
 
           $tsDNS = "vexor-rdp"
           try {
@@ -218,23 +222,19 @@ jobs:
               if ($st.Self.DNSName) { $tsDNS = $st.Self.DNSName.TrimEnd('.') }
           } catch {}
 
+          # Print Info
+          Write-Log "`n╔═══════════════════════════════════════════════════════╗" "Green"
+          Write-Log "║          🚀 VEXOR RDP — SERVER READY                  ║" "Green"
+          Write-Log "╠═══════════════════════════════════════════════════════╣" "Green"
+          Write-Log "║  MagicDNS : $tsDNS" "Green"
+          Write-Log "║  IP       : $tsIP" "Green"
+          Write-Log "║  Username : $u" "Green"
+          Write-Log "║  Password : $p" "Green"
+          Write-Log "╚═══════════════════════════════════════════════════════╝`n" "Green"
+
           $loopsInfo = "${{ github.event.inputs.loops }}"
           $remainingLoops = if (-not $loopsInfo) { 32 } else { [int]$loopsInfo }
 
-          # Print
-          Write-Host ""
-          Write-Host "╔═══════════════════════════════════════════════════════╗"
-          Write-Host "║          🚀 VEXOR RDP — SERVER READY                  ║"
-          Write-Host "╠═══════════════════════════════════════════════════════╣"
-          Write-Host "║  MagicDNS : $tsDNS"
-          Write-Host "║  IP       : $tsIP"
-          Write-Host "║  Username : $u"
-          Write-Host "║  Password : $p"
-          Write-Host "║  Run #    : ${{ github.run_number }}"
-          Write-Host "║  Loops    : $remainingLoops"
-          Write-Host "╚═══════════════════════════════════════════════════════╝"
-
-          # Summary
           $summaryLines = @(
               "# 🚀 VEXOR RDP — SERVER READY",
               "",
@@ -242,33 +242,24 @@ jobs:
               "| | |",
               "|---|---|",
               "| **MagicDNS (دايمًا)** | ``$tsDNS`` |",
-              "| **Tailscale IP** | ``$tsIP`` |",
               "| **Username** | ``$u`` |",
               "| **Password** | ``$p`` |",
               "| **Run #** | ${{ github.run_number }} |",
-              "| **Loops Left** | $remainingLoops |",
-              "",
-              "## ⚠️ استخدم MagicDNS",
-              "الاسم ده ثابت ومش بيتغير بين الـ rotations:",
-              "",
-              '```',
-              $tsDNS,
-              '```',
-              "",
-              "---"
+              "| **Loops Left** | $remainingLoops |"
           )
           $summaryLines -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
-          # Runtime loop
+          # ==========================================
+          Write-Log "⏱️ [PHASE 7] Running Timer (4h 50m)..." "Cyan"
           $m = 290
           for ($i = 1; $i -le $m; $i++) {
-              Write-Host "[$(Get-Date)] Remaining: $($m - $i) min."
+              if ($i % 30 -eq 0) { Write-Log "Remaining: $($m - $i) min." } # يطبع كل 30 دقيقة عشان اللوج ميبقاش ضخم
               Start-Sleep -Seconds 60
           }
 
-          # ============ BACKUP ============
-          Write-Host "💾 Backing up..."
-
+          # ==========================================
+          Write-Log "💾 [PHASE 8] Starting Backup..." "Cyan"
+          
           if (-not (Test-Path "repo_storage\data")) { New-Item -Path "repo_storage\data" -ItemType Directory -Force | Out-Null }
           $rcA = @($f, "repo_storage\data", "/E", "/R:1", "/W:1", "/NFL", "/NDL", "/NJH", "/NJS", "/NC", "/NS")
           & robocopy @rcA | Out-Null
@@ -302,23 +293,43 @@ jobs:
           Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* -ErrorAction SilentlyContinue |
               Where-Object { $_.DisplayName } |
               Select-Object DisplayName, DisplayVersion, Publisher |
-              Sort-Object DisplayName |
               Format-Table -AutoSize |
               Out-File -FilePath "repo_storage\settings\installed-programs.txt" -Encoding UTF8
 
           $bytes = (Get-ChildItem -Path "repo_storage" -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
-          Write-Host "📊 Backup size: $([math]::Round($bytes / 1MB, 2)) MB"
+          $mb = [math]::Round($bytes / 1MB, 2)
+          Write-Log "📊 Backup size: $mb MB" "Yellow"
+          if ($mb -gt 800) { Write-Log "⚠️ WARNING: Backup size is very large (>800MB). Push might fail!" "Red" }
 
+          Write-Log "🔄 Pushing backup to GitHub..." "Cyan"
           cd repo_storage
           git add -A
           git commit -m "VEXOR backup - run ${{ github.run_number }}" 2>$null
-          git push origin storage-data 2>&1 | Out-Host
+          
+          # فحص حالة الملفات قبل الدفع
+          $status = git status --porcelain
+          if ($status) {
+              git push origin storage-data 2>&1 | Out-Host
+              if ($LASTEXITCODE -ne 0) {
+                  Write-Log "❌ [ERROR] Git Push Failed! (Check repo size limits or token permissions)." "Red"
+                  # لا نوقف السكربت هنا عشان نكمل التدوير
+              } else {
+                  Write-Log "✅ Backup pushed successfully." "Green"
+              }
+          } else {
+              Write-Log "ℹ️ No changes to commit." "Yellow"
+          }
+          
           cd ..
           Remove-Item -Path repo_storage -Recurse -Force -ErrorAction SilentlyContinue
 
-          # ============ ROTATION ============
+          # ==========================================
+          Write-Log "🔁 [PHASE 9] Chain Rotation..." "Cyan"
           $loops = if (-not $loopsInfo) { 32 } else { [int]$loopsInfo }
-          if ($loops -eq 1) { Write-Host "🎯 VEXOR Chain Finished."; exit 0 }
+          if ($loops -eq 1) { 
+              Write-Log "🎯 VEXOR Chain Finished Successfully." "Green"
+              exit 0 
+          }
 
           $next = $loops - 1
           $bodyJson = @{
@@ -327,12 +338,17 @@ jobs:
           } | ConvertTo-Json -Depth 5
 
           try {
-              Invoke-RestMethod -Method POST `
+              Write-Log "📡 Calling GitHub API to trigger next run..." "Yellow"
+              $response = Invoke-RestMethod -Method POST `
                 -Uri "https://api.github.com/repos/${{ github.repository }}/actions/workflows/secure-rdp-loop.yml/dispatches" `
                 -Headers @{ Authorization = "Bearer $token"; "Accept"="application/vnd.github+json" } `
                 -Body $bodyJson -ErrorAction Stop
-              Write-Host "✅ Handoff → loop $next"
+              Write-Log "✅ Handoff SUCCESS → loop $next" "Green"
           } catch {
-              Write-Host "❌ ROTATION FAILED: $($_.Exception.Message)"
-              throw
+              Write-Log "❌ [FATAL] ROTATION FAILED!" "Red"
+              Write-Log "Error Message: $($_.Exception.Message)" "Red"
+              if ($_.ErrorDetails.Message) {
+                  Write-Log "API Response: $($_.ErrorDetails.Message)" "Red"
+              }
+              throw "Rotation Failed. The chain is broken."
           }
