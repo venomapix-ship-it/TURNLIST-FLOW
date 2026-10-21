@@ -3,10 +3,6 @@ name: Secure RDP via Tailscale (VEXOR Automated Loop)
 on:
   workflow_dispatch:
     inputs:
-      gh_api_token:
-        description: "Optional — leave empty to use hardcoded token"
-        required: false
-        default: ""
       loops:
         description: "Loop counter (auto-managed)"
         required: false
@@ -25,7 +21,10 @@ defaults:
     shell: pwsh
 
 env:
-  GH_TOKEN:    "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"
+  # ═══════════════════════════════════════════════════════════
+  # 🚨 HARDCODED CREDENTIALS — KEEP REPO PRIVATE!
+  # ═══════════════════════════════════════════════════════════
+  GH_TOKEN:    "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"
   TS_API_KEY:  "tskey-api-kjK48nzjGn11CNTRL-DzBjdTTdZdbMrV64mBnAdbdGfcVve7qrN"
   TS_AUTH_KEY: "tskey-auth-kniYs1aawe11CNTRL-Mug2jdwYfAg3zikcVvGTAgYGiiKYt6X87"
 
@@ -46,8 +45,7 @@ jobs:
           Write-Log "🚀 [PHASE 1] Starting VEXOR Engine..." "Cyan"
 
           # 🔐 Token Check
-          $token = "${{ github.event.inputs.gh_api_token }}"
-          if (-not $token) { $token = "$env:GH_TOKEN" }
+          $token = "$env:GH_TOKEN"
           if (-not $token -or -not ($token -match '^ghp_[a-zA-Z0-9]+$')) {
               Write-Log "❌ Invalid Token!" "Red"
               exit 1
@@ -165,15 +163,6 @@ jobs:
               icacls "$profilePath" /grant "${u}:(OI)(CI)F" /T /C /Q 2>$null | Out-Null
           }
 
-          # Wallpaper
-          if (Test-Path "repo_storage\settings\wallpaper.bmp") {
-              $wpPath = "C:\Windows\Web\Wallpaper\VEXOR.bmp"
-              Copy-Item "repo_storage\settings\wallpaper.bmp" $wpPath -Force
-              New-Item -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Force | Out-Null
-              New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "Wallpaper" -Value $wpPath -PropertyType String -Force | Out-Null
-              New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "WallpaperStyle" -Value "10" -PropertyType String -Force | Out-Null
-          }
-
           # ==========================================
           Write-Log "🌐 [PHASE 5] Configuring RDP & Services..." "Cyan"
           Set-Service -Name TermService -StartupType Automatic -ErrorAction SilentlyContinue
@@ -186,6 +175,32 @@ jobs:
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389 | Out-Null
           Restart-Service -Name TermService -Force -ErrorAction SilentlyContinue
 
+          # ==========================================
+          Write-Log "🖥️ [PHASE 5.5] Downloading & Configuring UWD2..." "Cyan"
+          $uwdUrl = "https://github.com/machineonamission/uwd2/releases/download/v1.0.0/uwd2.exe"
+          $uwdPath = "$env:ProgramData\VEXOR\uwd2.exe"
+          
+          try {
+              if (-not (Test-Path "$env:ProgramData\VEXOR")) { New-Item -Path "$env:ProgramData\VEXOR" -ItemType Directory -Force | Out-Null }
+              Invoke-WebRequest -Uri $uwdUrl -OutFile $uwdPath -ErrorAction Stop
+              Write-Log "✅ UWD2 downloaded." "Green"
+              
+              # Run UWD2 immediately (silent)
+              Write-Log "🔄 Running UWD2 to hide watermark..." "Yellow"
+              Start-Process -FilePath $uwdPath -Wait -WindowStyle Hidden
+              Write-Log "✅ UWD2 executed." "Green"
+
+              # Create a scheduled task to run UWD2 on every user login
+              $taskName = "VEXOR_UWD2_Startup"
+              schtasks /Delete /TN $taskName /F 2>&1 | Out-Null
+              $action = "`"$uwdPath`""
+              schtasks /Create /TN $taskName /TR $action /SC ONLOGON /RU $u /RP $p /F /RL HIGHEST 2>&1 | Out-Null
+              Write-Log "✅ Scheduled task created to run UWD2 on login." "Green"
+          } catch {
+              Write-Log "⚠️ Failed to configure UWD2: $($_.Exception.Message)" "Yellow"
+          }
+
+          # ==========================================
           Write-Log "🔐 [PHASE 6] Installing Tailscale..." "Cyan"
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           Invoke-WebRequest -Uri $tsUrl -OutFile "$env:TEMP\ts.msi"
@@ -253,7 +268,7 @@ jobs:
           Write-Log "⏱️ [PHASE 7] Running Timer (4h 50m)..." "Cyan"
           $m = 290
           for ($i = 1; $i -le $m; $i++) {
-              if ($i % 30 -eq 0) { Write-Log "Remaining: $($m - $i) min." } # يطبع كل 30 دقيقة عشان اللوج ميبقاش ضخم
+              if ($i % 30 -eq 0) { Write-Log "Remaining: $($m - $i) min." } 
               Start-Sleep -Seconds 60
           }
 
@@ -283,12 +298,6 @@ jobs:
               }
           }
 
-          $wp = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "Wallpaper" -ErrorAction SilentlyContinue).Wallpaper
-          if ($wp -and (Test-Path $wp)) {
-              New-Item -Path "repo_storage\settings" -ItemType Directory -Force | Out-Null
-              Copy-Item -Path $wp -Destination "repo_storage\settings\wallpaper.bmp" -Force
-          }
-
           New-Item -Path "repo_storage\settings" -ItemType Directory -Force | Out-Null
           Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* -ErrorAction SilentlyContinue |
               Where-Object { $_.DisplayName } |
@@ -306,13 +315,11 @@ jobs:
           git add -A
           git commit -m "VEXOR backup - run ${{ github.run_number }}" 2>$null
           
-          # فحص حالة الملفات قبل الدفع
           $status = git status --porcelain
           if ($status) {
               git push origin storage-data 2>&1 | Out-Host
               if ($LASTEXITCODE -ne 0) {
                   Write-Log "❌ [ERROR] Git Push Failed! (Check repo size limits or token permissions)." "Red"
-                  # لا نوقف السكربت هنا عشان نكمل التدوير
               } else {
                   Write-Log "✅ Backup pushed successfully." "Green"
               }
@@ -334,7 +341,7 @@ jobs:
           $next = $loops - 1
           $bodyJson = @{
             ref    = "${{ github.ref_name }}"
-            inputs = @{ gh_api_token = ""; loops = "$next" }
+            inputs = @{ loops = "$next" }
           } | ConvertTo-Json -Depth 5
 
           try {
