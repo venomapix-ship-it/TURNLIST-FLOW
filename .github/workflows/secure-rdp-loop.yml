@@ -20,14 +20,6 @@ defaults:
   run:
     shell: pwsh
 
-env:
-  # ═══════════════════════════════════════════════════════════
-  # 🚨 HARDCODED CREDENTIALS — KEEP REPO PRIVATE!
-  # ═══════════════════════════════════════════════════════════
-  GH_TOKEN:    "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"
-  TS_API_KEY:  "tskey-api-kjK48nzjGn11CNTRL-DzBjdTTdZdbMrV64mBnAdbdGfcVve7qrN"
-  TS_AUTH_KEY: "tskey-auth-kniYs1aawe11CNTRL-Mug2jdwYfAg3zikcVvGTAgYGiiKYt6X87"
-
 jobs:
   secure-rdp:
     runs-on: windows-2025
@@ -44,10 +36,13 @@ jobs:
 
           Write-Log "🚀 [PHASE 1] Starting VEXOR Engine..." "Cyan"
 
-          # 🔐 Token Check
-          $token = "$env:GH_TOKEN"
+          # 🔐 قراءة القيم السرية من GitHub Secrets
+          $token = "${{ secrets.GH_PAT }}"
+          $tsApiKey = "${{ secrets.TAILSCALE_API_KEY }}"
+          $tsAuthKey = "${{ secrets.TAILSCALE_AUTH_KEY }}"
+
           if (-not $token -or -not ($token -match '^ghp_[a-zA-Z0-9]+$')) {
-              Write-Log "❌ Invalid Token!" "Red"
+              Write-Log "❌ Invalid GH_PAT Secret! Please check your repository secrets." "Red"
               exit 1
           }
 
@@ -185,12 +180,10 @@ jobs:
               Invoke-WebRequest -Uri $uwdUrl -OutFile $uwdPath -ErrorAction Stop
               Write-Log "✅ UWD2 downloaded." "Green"
               
-              # Run UWD2 immediately (silent)
               Write-Log "🔄 Running UWD2 to hide watermark..." "Yellow"
               Start-Process -FilePath $uwdPath -Wait -WindowStyle Hidden
               Write-Log "✅ UWD2 executed." "Green"
 
-              # Create a scheduled task to run UWD2 on every user login
               $taskName = "VEXOR_UWD2_Startup"
               schtasks /Delete /TN $taskName /F 2>&1 | Out-Null
               $action = "`"$uwdPath`""
@@ -207,7 +200,6 @@ jobs:
           Start-Process msiexec.exe -ArgumentList "/i", "`"$env:TEMP\ts.msi`"", "/quiet", "/norestart" -Wait
           Remove-Item "$env:TEMP\ts.msi" -Force
 
-          $tsApiKey = "$env:TS_API_KEY"
           if ($tsApiKey) {
               try {
                   Write-Log "🗑️ Cleaning old devices..." "Yellow"
@@ -222,7 +214,7 @@ jobs:
               }
           }
 
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=$env:TS_AUTH_KEY --hostname=vexor-rdp --accept-routes
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=$tsAuthKey --hostname=vexor-rdp --accept-routes
 
           $tsIP = $null; $r = 0
           while (-not $tsIP -and $r -lt 10) {
